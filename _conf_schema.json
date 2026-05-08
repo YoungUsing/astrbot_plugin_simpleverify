@@ -1,0 +1,32 @@
+{
+  "verify_face_id": {
+    "description": "验证表情ID",
+    "type": "int",
+    "default": 76,
+    "hint": "发送给新成员需要其点击的QQ表情ID。76=赞，277=滑稽，63=玫瑰"
+  },
+  "success_face_id": {
+    "description": "验证成功表情ID",
+    "type": "int",
+    "default": 78,
+    "hint": "验证成功后贴在验证消息上的QQ表情ID。78=爱心，79=拥抱，144=喝彩"
+  },
+  "verify_text": {
+    "description": "验证提示文字",
+    "type": "text",
+    "default": "新人验证：请在 {timeout} 秒内点击上方表情完成验证，超时将被移出群聊。",
+    "hint": "发送给新成员的提示文字。{timeout} 会被替换为实际超时秒数"
+  },
+  "timeout": {
+    "description": "验证超时时间（秒）",
+    "type": "int",
+    "default": 60,
+    "hint": "新成员必须在此时间内点击表情完成验证"
+  },
+  "enable_groups": {
+    "description": "启用的群号列表",
+    "type": "list",
+    "default": [],
+    "hint": "留空则对所有群生效；填写群号（如 [\"123456789\"]）则仅对指定群生效"
+  }
+}
