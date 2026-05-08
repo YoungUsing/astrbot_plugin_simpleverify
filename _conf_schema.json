@@ -1,33 +1,32 @@
 {
+  "enable": {
+    "description": "启用插件",
+    "type": "bool",
+    "default": false,
+    "hint": "关闭后停止所有验证功能"
+  },
   "verify_face_id": {
     "description": "验证表情ID",
     "type": "int",
-    "default": 76,
-    "hint": "新成员需要贴的表情ID。76=赞，277=滑稽，63=玫瑰"
+    "default": 414,
+    "hint": "新成员需要贴的表情ID。414=按钮（确信），277=滑稽，63=玫瑰"
   },
   "success_face_id": {
     "description": "验证成功表情ID",
     "type": "int",
-    "default": 78,
+    "default": 144,
     "hint": "验证成功后贴在验证消息上的表情ID。78=爱心，79=拥抱，144=喝彩"
-  },
-  "emoji_type": {
-    "description": "贴表情类型",
-    "type": "string",
-    "default": "face",
-    "hint": "贴表情时使用的类型参数。QQ 原生表情填 face，Unicode emoji 填 emoji",
-    "options": ["face", "emoji"]
   },
   "verify_text": {
     "description": "验证提示文字",
     "type": "text",
-    "default": "新人验证：请在 {timeout} 秒内长按上方表情并「贴表情」完成验证，超时将被移出群聊。",
+    "default": "新人验证：请在 {timeout} 秒内贴表情完成验证，超时将被移出群聊。",
     "hint": "发送给新成员的提示文字。{timeout} 会被替换为实际超时秒数"
   },
   "timeout": {
     "description": "验证超时时间（秒）",
     "type": "int",
-    "default": 60,
+    "default": 120,
     "hint": "新成员必须在此时间内贴表情完成验证"
   },
   "enable_groups": {
