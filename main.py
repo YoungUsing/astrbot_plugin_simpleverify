@@ -6,7 +6,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
 
-@register("astrbot_plugin_simpleverify", "YoungUsing", "新成员入群验证：贴表情完成验证，超时自动移出", "1.0.3")
+@register("astrbot_plugin_simpleverify", "YoungUsing", "新成员入群验证：贴表情完成验证，超时自动移出", "1.1.0")
 class SimpleVerify(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
