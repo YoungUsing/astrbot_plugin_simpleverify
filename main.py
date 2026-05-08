@@ -135,6 +135,30 @@ class SimpleVerify(Star):
         if key in self._pending_verify:
             self._pending_verify[key].cancel()
 
+    @filter.command("verify")
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def manual_verify(self, event: AstrMessageEvent):
+        """手动对新成员发起验证：/verify @某人"""
+        group_id = event.get_group_id()
+        target_user_id = None
+
+        for comp in event.get_messages():
+            if isinstance(comp, Comp.At):
+                target_user_id = str(comp.qq)
+                break
+
+        if not target_user_id:
+            yield event.plain_result("[SimpleVerify] 请 @ 要验证的群成员，例如：/verify @某人")
+            return
+
+        if not self._client:
+            yield event.plain_result("[SimpleVerify] 未连接到 OneBot 协议端，无法发送验证")
+            return
+
+        await self._start_verify(group_id, target_user_id)
+        event.stop_event()
+
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def on_group_message(self, event: AstrMessageEvent):
         """监听群聊消息，检测验证用户是否通过发送表情来完成验证"""
