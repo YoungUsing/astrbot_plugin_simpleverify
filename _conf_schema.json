@@ -14,8 +14,8 @@
   "verify_text": {
     "description": "验证提示文字",
     "type": "text",
-    "default": "新人验证：请在 {timeout} 秒内点击上方表情完成验证，超时将被移出群聊。",
-    "hint": "发送给新成员的提示文字。{timeout} 会被替换为实际超时秒数"
+    "default": "新人验证：请在 {timeout} 秒内发送上方表情完成验证，超时将被移出群聊。",
+    "hint": "发送给新成员的提示文字。{timeout} 会被替换为实际超时秒数。QQ 中点击表情后需手动发送"
   },
   "timeout": {
     "description": "验证超时时间（秒）",

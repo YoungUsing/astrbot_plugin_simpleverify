@@ -1,5 +1,5 @@
 name: astrbot_plugin_simpleverify
 display_name: SimpleVerify
 desc: 新成员入群验证插件 - 要求新成员点击表情完成验证，超时自动踢出
-version: v1.0.0
+version: v1.0.0-pre1
 author: YoungUsing
