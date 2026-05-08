@@ -81,19 +81,20 @@ class SimpleVerify(Star):
 
         logger.info(f"[SimpleVerify] 开始验证: group_id={group_id}, user_id={user_id}, timeout={timeout}s")
 
-        msg_segments = [
-            {"type": "at", "data": {"qq": user_id}},
-            {"type": "text", "data": {"text": " "}},
-            {"type": "face", "data": {"id": verify_face}},
-            {"type": "text", "data": {"text": "\n" + text}},
-        ]
+        if not self._client:
+            logger.error("[SimpleVerify] _client 为 None，无法发送验证消息")
+            return
+
+        # 使用 CQ 码字符串格式发送，兼容性更好
+        cq_message = f"[CQ:at,qq={user_id}] [CQ:face,id={verify_face}]\n{text}"
 
         try:
             result = await self._client.api.call_action(
                 "send_group_msg",
                 group_id=int(group_id),
-                message=msg_segments,
+                message=cq_message,
             )
+            logger.info(f"[SimpleVerify] send_group_msg 返回: {result}")
             message_id = str(result.get("message_id", ""))
             self._verify_msg_ids[key] = message_id
             logger.info(
@@ -101,7 +102,10 @@ class SimpleVerify(Star):
                 f"message_id={message_id}"
             )
         except Exception as e:
-            logger.error(f"[SimpleVerify] 发送验证消息失败: {e}", exc_info=True)
+            logger.error(
+                f"[SimpleVerify] 发送验证消息失败: type={type(e).__name__}, "
+                f"msg={e}, args={e.args}"
+            )
             return
 
         if key in self._pending_verify:
