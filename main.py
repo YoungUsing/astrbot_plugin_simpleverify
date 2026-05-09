@@ -1,4 +1,5 @@
 import asyncio
+import random
 
 import astrbot.api.message_components as Comp
 from astrbot.api.event import filter, AstrMessageEvent
@@ -6,13 +7,27 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
 
-@register("astrbot_plugin_simpleverify", "YoungUsing", "新成员入群验证：贴表情完成验证，超时自动移出", "1.1.0")
+DEFAULT_RECAPTCHA_EMOJI_POOL = [
+    {"id": 0, "desc": "惊讶"},
+    {"id": 54, "desc": "刀"},
+    {"id": 74, "desc": "太阳"},
+    {"id": 109, "desc": "月亮"},
+    {"id": 60, "desc": "咖啡"},
+    {"id": 53, "desc": "蛋糕"},
+    {"id": 59, "desc": "便便"},
+    {"id": 66, "desc": "握手"},
+    {"id": 76, "desc": "赞"},
+]
+
+
+@register("astrbot_plugin_simpleverify", "YoungUsing", "新成员入群验证：三种验证模式，超时自动移出", "1.1.1")
 class SimpleVerify(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
         self._pending_verify: dict[tuple[str, str], asyncio.Task] = {}
         self._verify_msg_ids: dict[tuple[str, str], str] = {}
+        self._expected_face: dict[tuple[str, str], int] = {}
         self._group_umo: dict[str, str] = {}
         self._client = None
         self._self_id: str = ""
@@ -30,20 +45,32 @@ class SimpleVerify(Star):
                     logger.info("[SimpleVerify] 已注册 OneBot 通知事件处理器")
                 else:
                     logger.warning("[SimpleVerify] 当前协议端不支持 on_notice 注册")
-                # 提前获取 bot 自己的 QQ 号
                 login_info = await self._client.api.call_action("get_login_info")
                 self._self_id = str(login_info.get("user_id", "")) if isinstance(login_info, dict) else ""
                 logger.info(f"[SimpleVerify] bot self_id = {self._self_id}")
         except Exception as e:
             logger.error(f"[SimpleVerify] 初始化失败: type={type(e).__name__}, {e}")
+
+        method = self.config.get("verify_method", "低")
         logger.info(
-            f"[SimpleVerify] 配置: verify_face_id={self.config.get('verify_face_id', 76)}, "
-            f"success_face_id={self.config.get('success_face_id', 78)}, "
+            f"[SimpleVerify] 配置: verify_method={method}, "
             f"timeout={self.config.get('timeout', 60)}s, "
-            f"enable_groups={self.config.get('enable_groups', [])}"
+            f"enable_groups={self.config.get('enable_groups', [])}, "
+            f"challenge_count={self.config.get('challenge_count', 4)}"
         )
 
     # ── OneBot 通知事件 ────────────────────────────────────────
+
+    @staticmethod
+    def _extract_emoji_id(event: dict) -> str | None:
+        if "emoji_id" in event:
+            return str(event["emoji_id"])
+        likes = event.get("likes", [])
+        if likes and isinstance(likes, list) and len(likes) > 0:
+            first = likes[0]
+            if isinstance(first, dict):
+                return str(first.get("emoji_id", ""))
+        return None
 
     async def _on_notice(self, event: dict):
         notice_type = event.get("notice_type", "")
@@ -73,7 +100,6 @@ class SimpleVerify(Star):
             message_id = str(event.get("message_id", ""))
             is_add = event.get("is_add", True)
 
-            # 忽略机器人自己贴的表情
             if self._self_id and user_id == self._self_id:
                 return
             if not is_add:
@@ -86,24 +112,67 @@ class SimpleVerify(Star):
                 self._seen_reactions.clear()
             self._seen_reactions.add(dedup_key)
 
+            emoji_id = self._extract_emoji_id(event)
             logger.info(
                 f"[SimpleVerify] 贴表情通知: group_id={group_id}, "
-                f"user_id={user_id}, message_id={message_id}"
+                f"user_id={user_id}, message_id={message_id}, emoji_id={emoji_id}"
             )
-            await self._handle_reaction(group_id, user_id, message_id)
+            await self._handle_reaction(group_id, user_id, message_id, emoji_id)
+
+    # ── 表情选取 & 放置 ──────────────────────────────────────
+
+    def _get_random_emoji_set(self) -> tuple[int, str, list[int]]:
+        """高模式专用：从 recaptcha_emoji_pool 中随机选取目标表情和干扰表情。
+        自动排除 success_face_id，避免挑战表情与成功表情重复。
+        返回 (target_id, target_desc, [乱序后的表情 id 列表])。
+        """
+        pool = self.config.get("recaptcha_emoji_pool", DEFAULT_RECAPTCHA_EMOJI_POOL)
+        success_face = int(self.config.get("success_face_id", 78))
+        pool = [e for e in pool if e["id"] != success_face]
+
+        count = min(int(self.config.get("challenge_count", 4)), len(pool))
+        if count < 1:
+            count = 1
+
+        selected = random.sample(pool, count)
+        target = selected[0]
+        random.shuffle(selected)
+        face_ids = [e["id"] for e in selected]
+        return target["id"], target["desc"], face_ids
+
+    async def _place_emoji_reactions(self, message_id: str, face_ids: list[int]):
+        for fid in face_ids:
+            try:
+                await self._client.api.call_action(
+                    "set_msg_emoji_like",
+                    message_id=message_id,
+                    emoji_id=str(fid),
+                )
+            except Exception as e:
+                logger.warning(f"[SimpleVerify] 贴表情失败 face={fid}: type={type(e).__name__}, {e}")
+            await asyncio.sleep(0.1)
 
     # ── 验证流程 ──────────────────────────────────────────────
 
-    async def _send_verify_msg(self, group_id: str, user_id: str) -> str | None:
-        """发送验证消息文本。返回 message_id。"""
+    async def _send_verify_msg(self, group_id: str, user_id: str,
+                                extra: str = "") -> str | None:
         timeout = int(self.config.get("timeout", 60))
-        text = self.config.get(
-            "verify_text",
-            "新人验证：请在 {timeout} 秒内贴表情完成验证，超时将被移出群聊。",
-        )
-        text = text.replace("{timeout}", str(timeout))
+        method = self.config.get("verify_method", "低")
 
-        cq_message = f"[CQ:at,qq={user_id}]\n{text}"
+        if method == "低":
+            text = self.config.get("verify_text", "新人验证：请在 {timeout} 秒内点击下方按钮完成验证，超时将被移出群聊。")
+            prompt = text.replace("{timeout}", str(timeout))
+        elif method == "高":
+            text = self.config.get("verify_text_high", "新人验证：请在 {timeout} 秒内点击 {extra}，超时将被移出群聊。")
+            prompt = text.replace("{timeout}", str(timeout)).replace("{extra}", extra)
+        elif method == "中":
+            text = self.config.get("verify_text_medium", "新人验证：请在 {timeout} 秒内点击 {extra} 完成验证，超时将被移出群聊。")
+            prompt = text.replace("{timeout}", str(timeout)).replace("{extra}", extra)
+        else:
+            text = self.config.get("verify_text", "新人验证：请在 {timeout} 秒内点击下方按钮完成验证，超时将被移出群聊。")
+            prompt = text.replace("{timeout}", str(timeout))
+
+        cq_message = f"[CQ:at,qq={user_id}]\n{prompt}"
 
         try:
             result = await self._client.api.call_action(
@@ -123,16 +192,47 @@ class SimpleVerify(Star):
     async def _start_verify(self, group_id: str, user_id: str):
         key = (group_id, user_id)
         timeout = int(self.config.get("timeout", 60))
-        verify_face = str(self.config.get("verify_face_id", 76))
+        method = self.config.get("verify_method", "低")
 
-        logger.info(f"[SimpleVerify] 开始验证: group_id={group_id}, user_id={user_id}, timeout={timeout}s")
+        logger.info(
+            f"[SimpleVerify] 开始验证: group_id={group_id}, user_id={user_id}, "
+            f"method={method}, timeout={timeout}s"
+        )
 
-        message_id = await self._send_verify_msg(group_id, user_id)
+        target_face_id: int | None = None
+        face_ids: list[int] = []
+        extra = ""
+
+        if method == "低":
+            target_face_id = int(self.config.get("verify_face_id", 76))
+        elif method == "高":
+            target_id, target_desc, face_ids = self._get_random_emoji_set()
+            target_face_id = target_id
+            extra = f"点击表示「{target_desc}」的表情完成验证"
+            self._expected_face[key] = target_id
+        elif method == "中":
+            # 纯随机 face ID，无需表情池和描述
+            count = max(int(self.config.get("challenge_count", 4)), 1)
+            success_face = int(self.config.get("success_face_id", 78))
+            target_id = random.randint(0, 170)
+            while target_id == success_face:
+                target_id = random.randint(0, 170)
+            face_ids = [target_id]
+            while len(face_ids) < count:
+                fid = random.randint(0, 170)
+                if fid not in face_ids and fid != success_face:
+                    face_ids.append(fid)
+            random.shuffle(face_ids)
+            target_face_id = target_id
+            extra = f"[CQ:face,id={target_id}]"
+            self._expected_face[key] = target_id
+
+        message_id = await self._send_verify_msg(group_id, user_id, extra)
         if not message_id:
             logger.error("[SimpleVerify] 验证消息发送失败，放弃本次验证")
+            self._expected_face.pop(key, None)
             return
 
-        # 先存 message_id，再贴表情，防止贴表情的通知提前到达时找不到
         self._verify_msg_ids[key] = message_id
 
         if key in self._pending_verify:
@@ -142,16 +242,22 @@ class SimpleVerify(Star):
         self._pending_verify[key] = task
         logger.info(f"[SimpleVerify] 超时任务已创建，剩余 {timeout}s")
 
-        # 贴验证表情（在 _verify_msg_ids 注册之后，防止异步通知提前到达）
-        try:
-            await self._client.api.call_action(
-                "set_msg_emoji_like",
-                message_id=message_id,
-                emoji_id=verify_face,
+        if method == "低":
+            try:
+                await self._client.api.call_action(
+                    "set_msg_emoji_like",
+                    message_id=message_id,
+                    emoji_id=str(target_face_id),
+                )
+                logger.info(f"[SimpleVerify] 验证表情已贴: face={target_face_id}, msg_id={message_id}")
+            except Exception as e:
+                logger.warning(f"[SimpleVerify] 贴验证表情失败: type={type(e).__name__}, {e}")
+        else:
+            await self._place_emoji_reactions(message_id, face_ids)
+            logger.info(
+                f"[SimpleVerify] 验证表情已贴: faces={face_ids}, "
+                f"target={target_face_id}, msg_id={message_id}"
             )
-            logger.info(f"[SimpleVerify] 验证表情已贴: face={verify_face}, msg_id={message_id}")
-        except Exception as e:
-            logger.warning(f"[SimpleVerify] 贴验证表情失败: type={type(e).__name__}, {e}")
 
     async def _verify_timeout(self, group_id: str, user_id: str, timeout: int):
         key = (group_id, user_id)
@@ -178,6 +284,7 @@ class SimpleVerify(Star):
         finally:
             self._pending_verify.pop(key, None)
             self._verify_msg_ids.pop(key, None)
+            self._expected_face.pop(key, None)
 
     async def _kick_user(self, group_id: str, user_id: str) -> tuple[bool, str]:
         try:
@@ -194,7 +301,6 @@ class SimpleVerify(Star):
                 return False, "权限不足，需管理员手动处理"
             return False, detail
 
-        # set_group_kick 成功/失败都返回 None，通过查群成员信息验证
         try:
             await self._client.api.call_action(
                 "get_group_member_info",
@@ -207,12 +313,29 @@ class SimpleVerify(Star):
 
     # ── 贴表情验证 ────────────────────────────────────────────
 
-    async def _handle_reaction(self, group_id: str, user_id: str, message_id: str):
+    async def _handle_reaction(self, group_id: str, user_id: str,
+                                message_id: str, emoji_id: str | None):
         key = (group_id, user_id)
         expected_msg_id = self._verify_msg_ids.get(key)
         if not expected_msg_id or message_id != expected_msg_id:
             return
-        logger.info(f"[SimpleVerify] 贴表情匹配成功，user_id={user_id} 验证通过")
+
+        method = self.config.get("verify_method", "低")
+
+        if method == "低":
+            logger.info(f"[SimpleVerify] 贴表情匹配成功，user_id={user_id} 验证通过")
+        else:
+            expected_face = self._expected_face.get(key)
+            if expected_face is None or emoji_id is None:
+                return
+            if str(emoji_id) != str(expected_face):
+                logger.info(
+                    f"[SimpleVerify] 用户点击了错误的表情: "
+                    f"expected={expected_face}, got={emoji_id}"
+                )
+                return
+            logger.info(f"[SimpleVerify] 正确表情匹配成功，user_id={user_id} 验证通过")
+
         await self._verify_success(group_id, user_id)
 
     async def _verify_success(self, group_id: str, user_id: str):
@@ -240,6 +363,7 @@ class SimpleVerify(Star):
         if key in self._pending_verify:
             self._pending_verify[key].cancel()
             logger.debug(f"[SimpleVerify] 验证任务已取消: key={key}")
+        self._expected_face.pop(key, None)
 
     # ── 指令 ──────────────────────────────────────────────────
 
@@ -275,11 +399,11 @@ class SimpleVerify(Star):
         await self._start_verify(group_id, target_user_id)
         event.stop_event()
 
-    # ── 群消息兜底 ────────────────────────────────────────────
+    # ── 群消息兜底（仅低模式） ────────────────────
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def on_group_message(self, event: AstrMessageEvent):
-        """缓存 UMO，并兜底检测用户发送验证表情的消息"""
+        """缓存 UMO，低模式下兜底检测用户发送验证表情的消息。"""
         group_id = event.get_group_id()
         user_id = event.get_sender_id()
         key = (group_id, user_id)
@@ -287,6 +411,9 @@ class SimpleVerify(Star):
         self._group_umo[group_id] = event.unified_msg_origin
 
         if key not in self._pending_verify:
+            return
+
+        if self.config.get("verify_method", "低") != "低":
             return
 
         verify_face = int(self.config.get("verify_face_id", 76))
@@ -304,3 +431,4 @@ class SimpleVerify(Star):
             task.cancel()
         self._pending_verify.clear()
         self._verify_msg_ids.clear()
+        self._expected_face.clear()
