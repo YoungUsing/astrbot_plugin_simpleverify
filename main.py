@@ -20,7 +20,7 @@ DEFAULT_RECAPTCHA_EMOJI_POOL = [
 ]
 
 
-@register("astrbot_plugin_simpleverify", "YoungUsing", "新成员入群验证：三种验证模式，超时自动移出", "1.1.1")
+@register("astrbot_plugin_simpleverify", "YoungUsing", "新成员入群验证：三种验证模式，超时自动移出", "1.1.2")
 class SimpleVerify(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -121,11 +121,7 @@ class SimpleVerify(Star):
 
     # ── 表情选取 & 放置 ──────────────────────────────────────
 
-    def _get_random_emoji_set(self) -> tuple[int, str, list[int]]:
-        """高模式专用：从 recaptcha_emoji_pool 中随机选取目标表情和干扰表情。
-        自动排除 success_face_id，避免挑战表情与成功表情重复。
-        返回 (target_id, target_desc, [乱序后的表情 id 列表])。
-        """
+    def _get_random_emoji_set(self) -> tuple[int, str, str, list[int]]:
         pool = self.config.get("recaptcha_emoji_pool", DEFAULT_RECAPTCHA_EMOJI_POOL)
         success_face = int(self.config.get("success_face_id", 78))
         pool = [e for e in pool if e["id"] != success_face]
@@ -138,7 +134,7 @@ class SimpleVerify(Star):
         target = selected[0]
         random.shuffle(selected)
         face_ids = [e["id"] for e in selected]
-        return target["id"], target["desc"], face_ids
+        return target["id"], target["desc"], target.get("riddle", ""), face_ids
 
     async def _place_emoji_reactions(self, message_id: str, face_ids: list[int]):
         for fid in face_ids:
@@ -162,7 +158,7 @@ class SimpleVerify(Star):
         if method == "低":
             text = self.config.get("verify_text", "新人验证：请在 {timeout} 秒内点击下方按钮完成验证，超时将被移出群聊。")
             prompt = text.replace("{timeout}", str(timeout))
-        elif method == "高":
+        elif method in ("高", "极高"):
             text = self.config.get("verify_text_high", "新人验证：请在 {timeout} 秒内点击 {extra}，超时将被移出群聊。")
             prompt = text.replace("{timeout}", str(timeout)).replace("{extra}", extra)
         elif method == "中":
@@ -205,10 +201,13 @@ class SimpleVerify(Star):
 
         if method == "低":
             target_face_id = int(self.config.get("verify_face_id", 76))
-        elif method == "高":
-            target_id, target_desc, face_ids = self._get_random_emoji_set()
+        elif method in ("高", "极高"):
+            target_id, target_desc, target_riddle, face_ids = self._get_random_emoji_set()
             target_face_id = target_id
-            extra = f"点击表示「{target_desc}」的表情完成验证"
+            if method == "极高" and target_riddle:
+                extra = f"点击下方{target_riddle}的表情"
+            else:
+                extra = f"点击表示「{target_desc}」的表情完成验证"
             self._expected_face[key] = target_id
         elif method == "中":
             # 纯随机 face ID，无需表情池和描述

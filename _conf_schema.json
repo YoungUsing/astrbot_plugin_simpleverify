@@ -9,8 +9,8 @@
     "description": "验证模式",
     "type": "string",
     "default": "低",
-    "options": ["低", "中", "高"],
-    "hint": "低：单个表情点击验证；中：多个随机表情选一个；高：从表情池中随机选取挑战表情"
+    "options": ["低", "中", "高", "极高"],
+    "hint": "低：单个表情点击验证；中：多个随机表情选一个；高：表情池+描述出题；极高：表情池+谜语出题"
   },
   "verify_face_id": {
     "description": "验证表情ID（低模式）",
@@ -37,10 +37,10 @@
     "hint": "【仅中模式】可用占位符：{timeout} = 超时秒数，{extra} = 目标表情 CQ 码"
   },
   "verify_text_high": {
-    "description": "验证提示文字（高模式）",
+    "description": "验证提示文字（高/极高模式）",
     "type": "text",
     "default": "新人验证：请在 {timeout} 秒内点击 {extra}，超时将被移出群聊。",
-    "hint": "【仅高模式】可用占位符：{timeout} = 超时秒数，{extra} = 目标表情描述指引"
+    "hint": "【高/极高模式】可用占位符：{timeout} = 超时秒数，{extra} = 目标表情描述指引"
   },
   "timeout": {
     "description": "验证超时时间（秒）",
@@ -65,15 +65,15 @@
     "type": "template_list",
     "hint": "【仅高模式】用于生成验证挑战的表情池。系统会从此池中随机选取表情，需用户点击描述匹配的那个",
     "default": [
-      {"__template_key": "emoji", "id": 0, "desc": "惊讶"},
-      {"__template_key": "emoji", "id": 54, "desc": "刀"},
-      {"__template_key": "emoji", "id": 74, "desc": "太阳"},
-      {"__template_key": "emoji", "id": 109, "desc": "月亮"},
-      {"__template_key": "emoji", "id": 60, "desc": "咖啡"},
-      {"__template_key": "emoji", "id": 53, "desc": "蛋糕"},
-      {"__template_key": "emoji", "id": 59, "desc": "便便"},
-      {"__template_key": "emoji", "id": 66, "desc": "握手"},
-      {"__template_key": "emoji", "id": 76, "desc": "赞"}
+      {"__template_key": "emoji", "id": 0, "desc": "惊讶", "riddle": "瞪大眼睛的"},
+      {"__template_key": "emoji", "id": 54, "desc": "刀", "riddle": "可用于切的"},
+      {"__template_key": "emoji", "id": 74, "desc": "太阳", "riddle": "最亮的"},
+      {"__template_key": "emoji", "id": 109, "desc": "月亮", "riddle": "夜晚出现的"},
+      {"__template_key": "emoji", "id": 60, "desc": "咖啡", "riddle": "可以喝的"},
+      {"__template_key": "emoji", "id": 53, "desc": "蛋糕", "riddle": "可以吃的"},
+      {"__template_key": "emoji", "id": 59, "desc": "便便", "riddle": "臭臭的"},
+      {"__template_key": "emoji", "id": 66, "desc": "握手", "riddle": "表示友好的"},
+      {"__template_key": "emoji", "id": 76, "desc": "赞", "riddle": "表示认可的"}
     ],
     "templates": {
       "emoji": {
@@ -90,7 +90,13 @@
             "description": "表情描述",
             "type": "string",
             "default": "",
-            "hint": "该表情的中文描述，如「赞」「爱心」。验证时会提示用户点击对应描述的表情"
+            "hint": "该表情的中文描述，如「赞」「爱心」。riddle 出题风格下使用谜语字段"
+          },
+          "riddle": {
+            "description": "谜语提示（可选）",
+            "type": "string",
+            "default": "",
+            "hint": "riddle 出题风格下使用的谜语式提示，如刀→「可用于切的」、太阳→「最亮的」。留空则回退到 desc"
           }
         }
       }
