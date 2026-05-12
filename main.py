@@ -73,9 +73,6 @@ class SimpleVerify(Star):
     async def _on_notice(self, event: dict):
         notice_type = event.get("notice_type", "")
 
-        if not self.config.get("enable", True):
-            return
-
         if notice_type == "group_increase":
             group_id = str(event.get("group_id", ""))
             user_id = str(event.get("user_id", ""))
@@ -228,8 +225,9 @@ class SimpleVerify(Star):
 
         self._verify_msg_ids[key] = message_id
 
-        if key in self._pending_verify:
-            self._pending_verify[key].cancel()
+        old_task = self._pending_verify.pop(key, None)
+        if old_task:
+            old_task.cancel()
 
         task = asyncio.create_task(self._verify_timeout(group_id, user_id, timeout))
         self._pending_verify[key] = task
@@ -250,8 +248,11 @@ class SimpleVerify(Star):
 
     async def _verify_timeout(self, group_id: str, user_id: str, timeout: int):
         key = (group_id, user_id)
+        this_task = asyncio.current_task()
         try:
             await asyncio.sleep(timeout)
+            if key not in self._verify_msg_ids:
+                return
             logger.info(f"[SimpleVerify] 验证超时: group_id={group_id}, user_id={user_id}")
 
             message_id = self._verify_msg_ids.get(key, "")
@@ -271,7 +272,8 @@ class SimpleVerify(Star):
         except asyncio.CancelledError:
             logger.info(f"[SimpleVerify] 验证任务被取消（用户已验证成功）: user_id={user_id}")
         finally:
-            self._pending_verify.pop(key, None)
+            if self._pending_verify.get(key) is this_task:
+                self._pending_verify.pop(key, None)
             self._verify_msg_ids.pop(key, None)
             self._expected_face.pop(key, None)
             self._verify_face_ids.pop(key, None)
@@ -330,6 +332,7 @@ class SimpleVerify(Star):
 
     async def _verify_success(self, group_id: str, user_id: str):
         key = (group_id, user_id)
+        self._cancel_verify(key)
         message_id = self._verify_msg_ids.pop(key, None)
         if not message_id:
             return
@@ -360,8 +363,6 @@ class SimpleVerify(Star):
         except Exception as e:
             logger.warning(f"[SimpleVerify] 贴成功表情失败: type={type(e).__name__}, {e}")
 
-        self._cancel_verify(key)
-
     def _cancel_verify(self, key: tuple[str, str]):
         if key in self._pending_verify:
             self._pending_verify[key].cancel()
@@ -376,9 +377,6 @@ class SimpleVerify(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def manual_verify(self, event: AstrMessageEvent):
         """手动对新成员发起验证：/verify @某人"""
-        if not self.config.get("enable", True):
-            yield event.plain_result("[SimpleVerify] 插件已关闭")
-            return
         group_id = event.get_group_id()
         target_user_id = None
 
@@ -437,3 +435,5 @@ class SimpleVerify(Star):
         self._verify_msg_ids.clear()
         self._expected_face.clear()
         self._verify_face_ids.clear()
+        self._group_umo.clear()
+        self._seen_reactions.clear()

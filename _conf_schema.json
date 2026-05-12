@@ -1,10 +1,4 @@
 {
-  "enable": {
-    "description": "启用插件",
-    "type": "bool",
-    "default": false,
-    "hint": "关闭后停止所有验证功能"
-  },
   "verify_method": {
     "description": "验证模式",
     "type": "string",
