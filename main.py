@@ -438,19 +438,4 @@ class SimpleVerify(Star):
     # ── 卸载 ──────────────────────────────────────────────────
 
     async def terminate(self):
-        self._shutdown = True
-        if self._client and hasattr(self._client, "off_notice"):
-            try:
-                self._client.off_notice(self._on_notice)
-            except Exception:
-                pass
-        self._client = None
-        for task in self._pending_verify.values():
-            task.cancel()
-        self._pending_verify.clear()
-        self._verify_msg_ids.clear()
-        self._expected_face.clear()
-        self._verify_face_ids.clear()
-        self._group_umo.clear()
-        self._verify_locks.clear()
-        self._seen_reactions.clear()
+        
