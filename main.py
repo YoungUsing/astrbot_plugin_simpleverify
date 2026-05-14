@@ -32,6 +32,8 @@ class SimpleVerify(Star):
         self._group_umo: dict[str, str] = {}
         self._client = None
         self._self_id: str = ""
+        self._shutdown = False
+        self._verify_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._seen_reactions: set[tuple[str, str, str]] = set()
 
     async def initialize(self):
@@ -71,6 +73,8 @@ class SimpleVerify(Star):
         return None
 
     async def _on_notice(self, event: dict):
+        if self._shutdown:
+            return
         notice_type = event.get("notice_type", "")
 
         if notice_type == "group_increase":
@@ -100,14 +104,14 @@ class SimpleVerify(Star):
             if not is_add:
                 return
 
-            dedup_key = (group_id, user_id, message_id)
+            emoji_id = self._extract_emoji_id(event)
+
+            dedup_key = (group_id, user_id, message_id, emoji_id)
             if dedup_key in self._seen_reactions:
                 return
             if len(self._seen_reactions) > 500:
                 self._seen_reactions.clear()
             self._seen_reactions.add(dedup_key)
-
-            emoji_id = self._extract_emoji_id(event)
             await self._handle_reaction(group_id, user_id, message_id, emoji_id)
 
     # ── 表情选取 & 放置 ──────────────────────────────────────
@@ -178,6 +182,11 @@ class SimpleVerify(Star):
 
     async def _start_verify(self, group_id: str, user_id: str):
         key = (group_id, user_id)
+        lock = self._verify_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            await self._do_start_verify(group_id, user_id, key)
+
+    async def _do_start_verify(self, group_id: str, user_id: str, key: tuple[str, str]):
         timeout = int(self.config.get("timeout", 60))
         method = self.config.get("verify_method", "低")
 
@@ -429,6 +438,13 @@ class SimpleVerify(Star):
     # ── 卸载 ──────────────────────────────────────────────────
 
     async def terminate(self):
+        self._shutdown = True
+        if self._client and hasattr(self._client, "off_notice"):
+            try:
+                self._client.off_notice(self._on_notice)
+            except Exception:
+                pass
+        self._client = None
         for task in self._pending_verify.values():
             task.cancel()
         self._pending_verify.clear()
@@ -436,4 +452,5 @@ class SimpleVerify(Star):
         self._expected_face.clear()
         self._verify_face_ids.clear()
         self._group_umo.clear()
+        self._verify_locks.clear()
         self._seen_reactions.clear()
